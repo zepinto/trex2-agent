@@ -24,11 +24,13 @@ namespace TREX {
     // Symbol equality test is faster than string : use global Symbols to improve performances
     utils::Symbol const YoYoReactor::s_trex_pred("TREX");
     utils::Symbol const YoYoReactor::s_exec_pred("Exec");
+    utils::Symbol const YoYoReactor::s_underwater_pred("Underwater");
 
     utils::Symbol const YoYoReactor::s_reference_tl("reference");
     utils::Symbol const YoYoReactor::s_refstate_tl("refstate");
     utils::Symbol const YoYoReactor::s_control_tl("control");
     utils::Symbol const YoYoReactor::s_position_tl("estate");
+    utils::Symbol const YoYoReactor::s_medium_tl("medium");
     utils::Symbol const YoYoReactor::s_yoyo_tl("yoyo");
     utils::Symbol const YoYoReactor::s_yoyo_state_tl("yoyo_state");
 
@@ -37,7 +39,8 @@ namespace TREX {
               m_lastRefState(s_refstate_tl, "Failed"),
               m_lastControl(s_control_tl, "Failed"),
               m_lastReference(s_reference_tl, "Failed"),
-              m_lastPosition(s_position_tl, "Failed")
+              m_lastPosition(s_position_tl, "Failed"),
+    		  m_lastMedium(s_medium_tl, "Unknown")
     {
 
       m_pitch = Angles::radians(parse_attr<double>(15, TeleoReactor::xml_factory::node(arg),
@@ -46,6 +49,8 @@ namespace TREX {
       m_lat = m_lon = m_speed = m_minz = m_maxz = -1;
       m_time_at_surface = 0;
       m_time_underwater = 0;
+      m_surface_period = -1;
+      m_comm_time = 60;
       m_cmdz = 0;
       state = IDLE;
       use(s_reference_tl, true);
@@ -99,7 +104,7 @@ namespace TREX {
     bool
     YoYoReactor::synchronize()
     {
-      bool nearXY = false, nearZ = false, nearBottom = false, nearEnd = false;
+      bool nearXY = false, nearZ = false, nearBottom = false, nearEnd = false, atSurface = false, needsToCommunicate = false;
       double dist_to_target = 10000;
 
       Variable v;
@@ -175,19 +180,41 @@ namespace TREX {
         }
       }
 
+      if (m_lastMedium.predicate() == s_underwater_pred) {
+        // FIXME get tick duration
+        //m_time_underwater += CHRONO::duration<seconds> tickDuration().duration();
+        m_time_underwater ++;
+        m_time_at_surface = 0;
+        atSurface = false;
+      }
+      else {
+        // FIXME get tick duration
+        // m_time_at_surface += CHRONO::duration<seconds> tickDuration().duration();
+        m_time_at_surface ++;
+        m_time_underwater = 0;
+        atSurface = true;
+      }
+
+      needsToCommunicate = (m_surface_period > 0 && m_time_underwater >= m_surface_period);
+
       syslog(log::info) << "nearZ: " << nearZ<< ", atZ: "<< atZ << ", nearXY: " << nearXY << ", nearEnd: " <<
-          nearEnd << ", nearBottom: "<<nearBottom << std::endl;
+          nearEnd << ", nearBottom: "<<nearBottom << "time underwater: " << m_time_underwater << std::endl;
 
       switch(state)
       {
         case (ASCEND):
-                    m_time_at_surface  = 0;
 
         if (nearXY)
         {
           syslog(log::warn)<< "Arrived. now surfacing...";
           requestReference(m_lat, m_lon, m_speed, 0);
           state = SURFACE;
+        }
+        else if (needsToCommunicate)
+        {
+          syslog(log::warn)<< "Periodic surface for comms...";
+          requestReference(m_lat, m_lon, m_speed, 0);
+          state = COMMUNICATE;
         }
         else if (nearZ)
         {
@@ -205,12 +232,30 @@ namespace TREX {
           requestReference(m_lat, m_lon, m_speed, 0);
           state = SURFACE;
         }
+        else if (needsToCommunicate) {
+          syslog(log::warn)<< "Periodic surface for comms...";
+          requestReference(m_lat, m_lon, m_speed, 0);
+          state = COMMUNICATE;
+        }
         else if (nearZ || nearBottom || nearEnd)
         {
           syslog(log::info)<< "Now going up...";
           requestReference(m_lat, m_lon, m_speed, m_minz);
           state = ASCEND;
         }
+        break;
+
+        case (COMMUNICATE):
+          if (nearXY)
+          {
+            syslog(log::info)<< "Arrived. now surfacing...";
+            state = SURFACE;
+          }
+          else if (m_time_at_surface >= m_comm_time)
+          {
+            requestReference(m_lat, m_lon, m_speed, m_maxz);
+            state = DESCEND;
+          }
         break;
 
         case (SURFACE):
@@ -227,6 +272,7 @@ namespace TREX {
                   state = IDLE;
                 }
         break;
+
         default:
           syslog(log::info)<< "Just idling...";
           postUniqueObservation(Observation(s_yoyo_tl, "Idle"));
@@ -317,6 +363,10 @@ namespace TREX {
         if (v.domain().isSingleton())
           m_maxz = v.domain().getTypedSingleton<double, true>();
 
+        v = g->getAttribute("surfacing_period");
+        if (v.domain().isSingleton())
+          m_surface_period = v.domain().getTypedSingleton<double, true>();
+
         requestReference(m_lat, m_lon, m_speed, m_maxz);
         state = DESCEND;
         postUniqueObservation(*g);
@@ -363,6 +413,8 @@ namespace TREX {
       }
       else if (s_position_tl == obs.object())
         m_lastPosition = obs;
+      else if (s_medium_tl == obs.object())
+        m_lastMedium = obs;
     }
 
     YoYoReactor::~YoYoReactor()

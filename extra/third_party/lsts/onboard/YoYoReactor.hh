@@ -22,6 +22,7 @@
 # include <DUNE/DUNE.hpp>
 # include <DUNE/Math/Angles.hpp>
 # include <DUNE/Coordinates/WGS84.hpp>
+# include <boost/chrono/duration.hpp>
 
 using namespace TREX::transaction;
 using namespace TREX::utils;
@@ -39,6 +40,8 @@ namespace TREX {
    */
   namespace LSTS {
 
+    typedef CHRONO::seconds seconds;
+
     typedef struct {
       double lat, lon;
       double z;
@@ -46,7 +49,7 @@ namespace TREX {
       int tick;
     } ReferenceRequest;
 
-    enum EXEC_STATE {IDLE, DESCEND, ASCEND, SURFACE, DONE};
+    enum EXEC_STATE {IDLE, DESCEND, ASCEND, SURFACE, COMMUNICATE, DONE};
 
     class YoYoReactor : public LstsReactor
     {
@@ -57,9 +60,10 @@ namespace TREX {
       TREX::transaction::Observation m_lastControl;
       TREX::transaction::Observation m_lastReference;
       TREX::transaction::Observation m_lastPosition;
+      TREX::transaction::Observation m_lastMedium;
 
-      double m_lat, m_lon, m_minz, m_maxz, m_speed, m_cmdz, m_pitch;
-      int m_time_at_surface, m_time_underwater;
+      double m_lat, m_lon, m_minz, m_maxz, m_speed, m_cmdz, m_pitch, m_surface_period, m_comm_time;
+      double m_time_at_surface, m_time_underwater;
       ReferenceRequest m_lastSentRef, m_lastSeenRef;
 
       void handleInit();
@@ -79,13 +83,15 @@ namespace TREX {
     private:
       static utils::Symbol const s_trex_pred;
       static utils::Symbol const s_exec_pred;
-      
+      static utils::Symbol const s_underwater_pred;
       static utils::Symbol const s_reference_tl;
       static utils::Symbol const s_refstate_tl;
       static utils::Symbol const s_control_tl;
       static utils::Symbol const s_position_tl;
       static utils::Symbol const s_yoyo_tl;
       static utils::Symbol const s_yoyo_state_tl;
+      static utils::Symbol const s_medium_tl;
+
     };
 
 
