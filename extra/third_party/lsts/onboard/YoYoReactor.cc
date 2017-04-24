@@ -45,6 +45,7 @@ namespace TREX {
 
       m_lat = m_lon = m_speed = m_minz = m_maxz = -1;
       m_time_at_surface = 0;
+      m_time_underwater = 0;
       m_cmdz = 0;
       state = IDLE;
       use(s_reference_tl, true);
